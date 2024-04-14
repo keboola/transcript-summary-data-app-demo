@@ -118,8 +118,8 @@ def main():
     webrtc_ctx = webrtc_streamer(
         key="speech-to-text",
         mode=WebRtcMode.SENDONLY,
-        audio_receiver_size=4096,
-        rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
+        audio_receiver_size=1024,
+        rtc_configuration={"iceServers": [{"urls": ["stun:stun.relay.metered.ca:80"]}, {"urls":"turn:global.relay.metered.ca:80","username":"1b8aa9accf06c1594059c08b","credential":"dnDQUZM/2tgGULlF",}, {"urls":"turn:global.relay.metered.ca:443","username":"1b8aa9accf06c1594059c08b","credential":"dnDQUZM/2tgGULlF",}]},
         media_stream_constraints={"video": False, "audio": True},
     )
 
