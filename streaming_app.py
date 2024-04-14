@@ -4,6 +4,8 @@ import queue
 import time
 from google.cloud import speech
 import streamlit as st
+import av
+import logging
 from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
 import vertexai
 import vertexai.preview.generative_models as generative_models
@@ -40,6 +42,39 @@ def generate_summary(content):
         return "- Unable to generate summary due to insufficient data."
     return output_text
 
+def start_audio_stream(webrtc_ctx, transcript_queue, stop_event):
+    client = speech.SpeechClient()
+    config = speech.RecognitionConfig(
+        encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
+        sample_rate_hertz=16000,
+        language_code='en-US',
+        enable_automatic_punctuation=True
+    )
+    streaming_config = speech.StreamingRecognitionConfig(config=config, interim_results=True)
+    
+    requests = []  # This will store ongoing audio requests
+    
+    while not stop_event.is_set() and webrtc_ctx.state.playing:
+        try:
+            audio_frames = webrtc_ctx.audio_receiver.get_frames(timeout=5)
+        except queue.Empty:
+            print("No audio frames received.")
+            continue
+        
+        for frame in audio_frames:
+            audio_samples = np.frombuffer(frame.to_ndarray().tobytes(), dtype=np.int16)
+            
+            if frame.layout.name == 'stereo':
+                audio_samples = audio_samples.reshape(-1, 2).mean(axis=1).astype(np.int16)  # Stereo to mono
+            
+            audio_bytes = audio_samples.tobytes()
+            requests.append(speech.StreamingRecognizeRequest(audio_content=audio_bytes))
+        
+        if requests:
+            responses = client.streaming_recognize(config=streaming_config, requests=requests)
+            process_responses(responses, transcript_queue)
+            requests = []  # Reset requests after sending
+
 def process_responses(responses, transcript_queue):
     for response in responses:
         for result in response.results:
@@ -50,63 +85,6 @@ def process_responses(responses, transcript_queue):
                     print("Transcript added to queue:", transcript)
                 else:
                     print("Received final result with empty transcript.")
-
-
-def start_audio_stream(webrtc_ctx, transcript_queue, stop_event):
-    client = speech.SpeechClient()
-    config = speech.RecognitionConfig(
-        encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-        sample_rate_hertz=16000,
-        language_code='en-US',
-        enable_automatic_punctuation=True
-    )
-    streaming_config = speech.StreamingRecognitionConfig(config=config, interim_results=True)
-
-    while not stop_event.is_set() and webrtc_ctx.state.playing:
-        try:
-            audio_frames = webrtc_ctx.audio_receiver.get_frames(timeout=1)
-        except queue.Empty:
-            print("No audio frames received.")
-            continue
-
-        if not audio_frames:
-            print("No audio frames to process.")
-            continue
-
-        audio_samples = np.concatenate([
-            np.frombuffer(frame.to_ndarray().tobytes(), dtype=np.int16) for frame in audio_frames
-        ])
-
-        # Ensure it is mono
-        if len(audio_frames[0].layout.channels) > 1:
-        # Assuming the input is stereo and channels are interleaved
-            audio_samples = audio_samples.reshape(-1, 2).mean(axis=1).astype(np.int16)
-
-        # Debug: Check the length and content of the audio_samples array
-        print(f"Audio samples array length: {len(audio_samples)}")
-        if len(audio_samples) == 0:
-            print("Empty audio samples array.")
-            continue
-
-        # Convert numpy array to bytes and send to Google Speech API
-        audio_bytes = audio_samples.tobytes()
-        print(f"Audio bytes length: {len(audio_bytes)}")
-
-        # Modify this part to change the buffer size
-        if len(audio_samples) > 0:
-            # Example: Send audio data in chunks of approximately 1 second (16000 samples for 16000 Hz audio)
-            chunk_size = 16000  # Adjust size based on experimentation
-            for start in range(0, len(audio_samples), chunk_size):
-                end = start + chunk_size
-                audio_chunk = audio_samples[start:end]
-                audio_bytes = audio_chunk.tobytes()
-                if len(audio_bytes) > 0:
-                    requests = [speech.StreamingRecognizeRequest(audio_content=audio_bytes)]
-                    responses = client.streaming_recognize(config=streaming_config, requests=requests)
-                    process_responses(responses, transcript_queue)
-                else:
-                    print("Generated empty audio bytes.")
-
 
 
 def stream_transcripts(transcript_queue):
@@ -127,7 +105,7 @@ def summary_update(transcript_queue, summary_queue, stop_event):
     accumulated_text = ""
     while not stop_event.is_set():
         try:
-            transcript = transcript_queue.get(timeout=5)
+            transcript = transcript_queue.get(timeout=0)
             if transcript:
                 accumulated_text += " " + transcript
                 print("Accumulated transcript:", accumulated_text)
@@ -151,7 +129,7 @@ def main():
     webrtc_ctx = webrtc_streamer(
         key="speech-to-text",
         mode=WebRtcMode.SENDONLY,
-        audio_receiver_size=1024,
+        audio_receiver_size=4096,
         rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
         media_stream_constraints={"video": False, "audio": True}
     )
@@ -177,4 +155,8 @@ def main():
         st.success("Recording stopped")
 
 if __name__ == "__main__":
+
+    st_webrtc_logger = logging.getLogger("streamlit_webrtc")
+    st_webrtc_logger.setLevel(logging.DEBUG)
+
     main()
