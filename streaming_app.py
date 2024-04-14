@@ -11,20 +11,19 @@ import vertexai
 import vertexai.preview.generative_models as generative_models
 from vertexai.generative_models import GenerativeModel, Part, FinishReason
 import os
-# authenticate the google cloud speech client using the service account credentials stored in the .streamlit/secrets.toml file
+from google.oauth2 import service_account
 
-
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = st.secrets["gcp_service_account"]
-
-client 
-
+# Create API client.
+credentials = service_account.Credentials.from_service_account_info(
+    st.secrets["gcp_service_account"]
+)
 
 
 def generate_summary(content):
     if not content.strip():
         return "- No content provided for summarization."
     
-    vertexai.init(project="keboola-ai", location="us-central1")
+    vertexai.init(project="keboola-ai", location="us-central1", credentials=credentials)
     model = generative_models.GenerativeModel("gemini-1.5-pro-preview-0409")
 
     generation_config = {
@@ -52,7 +51,7 @@ def generate_summary(content):
     return output_text
 
 def start_audio_stream(webrtc_ctx, transcript_queue, stop_event):
-    client = speech.SpeechClient()
+    client = speech.SpeechClient(credentials=credentials)
     config = speech.RecognitionConfig(
         encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
         sample_rate_hertz=16000,
