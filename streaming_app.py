@@ -105,7 +105,7 @@ def summary_update(transcript_queue, summary_queue, stop_event):
     accumulated_text = ""
     while not stop_event.is_set():
         try:
-            transcript = transcript_queue.get(timeout=0)
+            transcript = transcript_queue.get(timeout=1)
             if transcript:
                 accumulated_text += " " + transcript
                 print("Accumulated transcript:", accumulated_text)
