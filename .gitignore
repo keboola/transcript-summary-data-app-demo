@@ -1,3 +1,10 @@
 temp_audio.wav
 temp_image.jpg
 .streamlit/secrets.toml
+tmp/debug_audio.wav
+.DS_Store
+audio_reciever_test.py
+docker-compose.yml
+Dockerfile
+streamlit_mic_recorder_app.py
+__pycache__/streamlit_mic_recorder_app.cpython-311.pyc
