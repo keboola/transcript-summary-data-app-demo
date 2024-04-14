@@ -10,6 +10,15 @@ from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
 import vertexai
 import vertexai.preview.generative_models as generative_models
 from vertexai.generative_models import GenerativeModel, Part, FinishReason
+import os
+# authenticate the google cloud speech client using the service account credentials stored in the .streamlit/secrets.toml file
+
+
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = st.secrets["gcp_service_account"]
+
+client 
+
+
 
 def generate_summary(content):
     if not content.strip():
