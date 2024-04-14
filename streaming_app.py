@@ -19,7 +19,7 @@ import jwt
 
 # Create API client.
 credentials = service_account.Credentials.from_service_account_info(
-    jwt.decode(st.secrets["encoded_token"], "secret", algorithms=["HS256"])
+    jwt.decode(st.secrets["encoded_token"], 'secret', algorithms=["HS256"])
 )
 
 
@@ -69,7 +69,7 @@ def start_audio_stream(webrtc_ctx, transcript_queue, stop_event):
     
     while not stop_event.is_set() and webrtc_ctx.state.playing:
         try:
-            audio_frames = webrtc_ctx.audio_receiver.get_frames(timeout=5)
+            audio_frames = webrtc_ctx.audio_receiver.get_frames(timeout=1)
         except queue.Empty:
             print("No audio frames received.")
             continue
@@ -132,7 +132,7 @@ def summary_update(transcript_queue, summary_queue, stop_event):
                 summary_queue.put(summary)
                 print("Summary added to queue:", summary)
                 accumulated_text = ""
-            time.sleep(10)
+            time.sleep(15)
 def main():
     st.title("Real-time Speech Recognition and Summary Generation")
     transcript_queue = queue.Queue()
