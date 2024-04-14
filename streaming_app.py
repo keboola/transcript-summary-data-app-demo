@@ -13,10 +13,17 @@ from vertexai.generative_models import GenerativeModel, Part, FinishReason
 import os
 from google.oauth2 import service_account
 
+#iterate through the secrets and add them to a dict
+service_acct_dict = {}
+for key, value in st.secrets.items():
+    service_acct_dict[key] = value
+    
+
 # Create API client.
 credentials = service_account.Credentials.from_service_account_info(
-    st.secrets["gcp_service_account"]
+    service_acct_dict
 )
+
 
 
 def generate_summary(content):
@@ -113,7 +120,7 @@ def summary_update(transcript_queue, summary_queue, stop_event):
     accumulated_text = ""
     while not stop_event.is_set():
         try:
-            transcript = transcript_queue.get(timeout=1)
+            transcript = transcript_queue.get(timeout=2)
             if transcript:
                 accumulated_text += " " + transcript
                 print("Accumulated transcript:", accumulated_text)
