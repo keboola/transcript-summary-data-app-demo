@@ -1,16 +1,18 @@
+import numpy as np
 import threading
 import queue
 import time
 from google.cloud import speech
-import pydub
 import streamlit as st
 from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
 import vertexai
 import vertexai.preview.generative_models as generative_models
 from vertexai.generative_models import GenerativeModel, Part, FinishReason
 
-
 def generate_summary(content):
+    if not content.strip():
+        return "- No content provided for summarization."
+    
     vertexai.init(project="keboola-ai", location="us-central1")
     model = generative_models.GenerativeModel("gemini-1.5-pro-preview-0409")
 
@@ -33,8 +35,22 @@ def generate_summary(content):
         stream=True,
     )
 
-    output_text = "".join(response.text for response in responses)
+    output_text = "".join(response.text for response in responses if response.text)
+    if not output_text:
+        return "- Unable to generate summary due to insufficient data."
     return output_text
+
+def process_responses(responses, transcript_queue):
+    for response in responses:
+        for result in response.results:
+            if result.is_final:
+                transcript = result.alternatives[0].transcript
+                if transcript:
+                    transcript_queue.put(transcript)
+                    print("Transcript added to queue:", transcript)
+                else:
+                    print("Received final result with empty transcript.")
+
 
 def start_audio_stream(webrtc_ctx, transcript_queue, stop_event):
     client = speech.SpeechClient()
@@ -50,28 +66,48 @@ def start_audio_stream(webrtc_ctx, transcript_queue, stop_event):
         try:
             audio_frames = webrtc_ctx.audio_receiver.get_frames(timeout=1)
         except queue.Empty:
+            print("No audio frames received.")
             continue
 
-        sound_chunk = pydub.AudioSegment.empty()
-        for audio_frame in audio_frames:
-            sound = pydub.AudioSegment(
-                data=audio_frame.to_ndarray().tobytes(),
-                sample_width=audio_frame.format.bytes,
-                frame_rate=audio_frame.sample_rate,
-                channels=len(audio_frame.layout.channels),
-            )
-            sound_chunk += sound
+        if not audio_frames:
+            print("No audio frames to process.")
+            continue
 
-        if len(sound_chunk) > 0:
-            sound_chunk = sound_chunk.set_channels(1).set_frame_rate(16000)
-            audio_bytes = sound_chunk.raw_data
-            requests = (speech.StreamingRecognizeRequest(audio_content=audio_bytes),)
-            responses = client.streaming_recognize(config=streaming_config, requests=requests)
-            for response in responses:
-                for result in response.results:
-                    if result.is_final:
-                        transcript = result.alternatives[0].transcript
-                        transcript_queue.put(transcript)
+        audio_samples = np.concatenate([
+            np.frombuffer(frame.to_ndarray().tobytes(), dtype=np.int16) for frame in audio_frames
+        ])
+
+        # Ensure it is mono
+        if len(audio_frames[0].layout.channels) > 1:
+        # Assuming the input is stereo and channels are interleaved
+            audio_samples = audio_samples.reshape(-1, 2).mean(axis=1).astype(np.int16)
+
+        # Debug: Check the length and content of the audio_samples array
+        print(f"Audio samples array length: {len(audio_samples)}")
+        if len(audio_samples) == 0:
+            print("Empty audio samples array.")
+            continue
+
+        # Convert numpy array to bytes and send to Google Speech API
+        audio_bytes = audio_samples.tobytes()
+        print(f"Audio bytes length: {len(audio_bytes)}")
+
+        # Modify this part to change the buffer size
+        if len(audio_samples) > 0:
+            # Example: Send audio data in chunks of approximately 1 second (16000 samples for 16000 Hz audio)
+            chunk_size = 16000  # Adjust size based on experimentation
+            for start in range(0, len(audio_samples), chunk_size):
+                end = start + chunk_size
+                audio_chunk = audio_samples[start:end]
+                audio_bytes = audio_chunk.tobytes()
+                if len(audio_bytes) > 0:
+                    requests = [speech.StreamingRecognizeRequest(audio_content=audio_bytes)]
+                    responses = client.streaming_recognize(config=streaming_config, requests=requests)
+                    process_responses(responses, transcript_queue)
+                else:
+                    print("Generated empty audio bytes.")
+
+
 
 def stream_transcripts(transcript_queue):
     while True:
@@ -91,20 +127,21 @@ def summary_update(transcript_queue, summary_queue, stop_event):
     accumulated_text = ""
     while not stop_event.is_set():
         try:
-                transcript = transcript_queue.get_nowait()
-                if transcript:
-                    print(f"Received transcript: {transcript}")  # Debugging print
+            transcript = transcript_queue.get(timeout=5)
+            if transcript:
                 accumulated_text += " " + transcript
+                print("Accumulated transcript:", accumulated_text)
         except queue.Empty:
-            if accumulated_text:
-                print(f"Accumulated transcript for summary: {accumulated_text}")  # Debugging print
-                summary = generate_summary(accumulated_text)
-                if summary:
-                    print(f"Generated summary: {summary}")  # Debugging print
+            print("Transcript queue is empty, checking again.")
+            continue
+        
+        if accumulated_text.strip():
+            summary = generate_summary(accumulated_text.strip())
+            if summary:
                 summary_queue.put(summary)
+                print("Summary added to queue:", summary)
                 accumulated_text = ""
-            time.sleep(30)  
-
+            time.sleep(10)
 def main():
     st.title("Real-time Speech Recognition and Summary Generation")
     transcript_queue = queue.Queue()
@@ -116,13 +153,14 @@ def main():
         mode=WebRtcMode.SENDONLY,
         audio_receiver_size=1024,
         rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
-        media_stream_constraints={"video": False, "audio": True},
+        media_stream_constraints={"video": False, "audio": True}
     )
 
     audio_thread = threading.Thread(target=start_audio_stream, args=(webrtc_ctx, transcript_queue, stop_event))
     summary_thread = threading.Thread(target=summary_update, args=(transcript_queue, summary_queue, stop_event))
 
     if st.button("Start Recording"):
+        print("Starting threads...")
         stop_event.clear()
         audio_thread.start()
         summary_thread.start()
