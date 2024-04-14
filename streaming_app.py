@@ -12,16 +12,14 @@ import vertexai.preview.generative_models as generative_models
 from vertexai.generative_models import GenerativeModel, Part, FinishReason
 import os
 from google.oauth2 import service_account
+import jwt
 
-#iterate through the secrets and add them to a dict
-service_acct_dict = {}
-for key, value in st.secrets.items():
-    service_acct_dict[key] = value
-    
+
+
 
 # Create API client.
 credentials = service_account.Credentials.from_service_account_info(
-    service_acct_dict
+    jwt.decode(st.secrets["encoded_token"], "secret", algorithms=["HS256"])
 )
 
 
