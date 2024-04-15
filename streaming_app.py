@@ -95,19 +95,23 @@ def summary_update(transcript_queue, summary_queue, stop_event):
     accumulated_text = ""
     while not stop_event.is_set():
         try:
-                transcript = transcript_queue.get_nowait()
-                if transcript:
-                    print(f"Received transcript: {transcript}")  # Debugging print
-                accumulated_text += " " + transcript
+            transcript = transcript_queue.get(timeout=10)
+            if transcript:
+                print(f"Received transcript: {transcript}")  # Debugging print
+            accumulated_text += " " + transcript
+
         except queue.Empty:
-            if accumulated_text:
-                print(f"Accumulated transcript for summary: {accumulated_text}")  # Debugging print
-                summary = generate_summary(accumulated_text)
-                if summary:
-                    print(f"Generated summary: {summary}")  # Debugging print
-                summary_queue.put(summary)
-                accumulated_text = ""
-            time.sleep(30)  
+                print("No new transcripts received in the last 10 seconds.")
+                continue  # Continue the while loop if no transcript is available
+
+        if accumulated_text:
+            print(f"Accumulated transcript for summary: {accumulated_text}")  # Debugging print
+            summary = generate_summary(accumulated_text)
+            if summary:
+                print(f"Generated summary: {summary}")  # Debugging print
+            summary_queue.put(summary)
+            accumulated_text = ""
+        time.sleep(30)  
 
 def main():
     st.title("Real-time Speech Recognition and Summary Generation")
