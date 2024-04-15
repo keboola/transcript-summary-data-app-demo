@@ -95,7 +95,7 @@ def summary_update(transcript_queue, summary_queue, stop_event):
     accumulated_text = ""
     while not stop_event.is_set():
         try:
-            transcript = transcript_queue.get(timeout=10)
+            transcript = transcript_queue.get(timeout=1)
             if transcript:
                 print(f"Received transcript: {transcript}")  # Debugging print
             accumulated_text += " " + transcript
@@ -111,7 +111,7 @@ def summary_update(transcript_queue, summary_queue, stop_event):
                 print(f"Generated summary: {summary}")  # Debugging print
             summary_queue.put(summary)
             accumulated_text = ""
-        time.sleep(30)  
+        time.sleep(15)  
 
 def main():
     st.title("Real-time Speech Recognition and Summary Generation")
@@ -122,7 +122,7 @@ def main():
     webrtc_ctx = webrtc_streamer(
         key="speech-to-text",
         mode=WebRtcMode.SENDONLY,
-        audio_receiver_size=1024,
+        audio_receiver_size=2048,
         rtc_configuration={"iceServers": [{"urls": ["stun:stun.relay.metered.ca:80"]}, {"urls":"turn:global.relay.metered.ca:80","username":"1b8aa9accf06c1594059c08b","credential":"dnDQUZM/2tgGULlF",}, {"urls":"turn:global.relay.metered.ca:80?transport=tcp","username":"1b8aa9accf06c1594059c08b","credential":"dnDQUZM/2tgGULlF",}, {"urls":"turn:global.relay.metered.ca:443","username":"1b8aa9accf06c1594059c08b","credential":"dnDQUZM/2tgGULlF",}, {"urls":"turns:global.relay.metered.ca:443?transport=tcp","username":"1b8aa9accf06c1594059c08b","credential":"dnDQUZM/2tgGULlF",}]},
         media_stream_constraints={"video": False, "audio": True},
     )
