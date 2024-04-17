@@ -5,6 +5,8 @@ from google.cloud import speech
 from google.oauth2 import service_account
 import streamlit as st
 import sys
+import base64
+import os
 import time
 import vertexai
 import vertexai.preview.generative_models as generative_models
@@ -14,6 +16,29 @@ from vertexai.generative_models import GenerativeModel, Part, FinishReason
 #credentials = service_account.Credentials.from_service_account_info(st.secrets["gcp_service_account"])
 
 client = speech.SpeechClient()
+
+image_path = os.path.dirname(os.path.abspath(__file__))
+
+KBC_LOGO = image_path + "/static/keboola_mini.png"
+GC_LOGO = image_path + "/static/google_mini.png"
+
+
+def create_or_clear_file(file_path):
+    """Create a new empty file or clear an existing file."""
+    with open(file_path, 'w') as file:
+        file.truncate()  # Clear the file
+
+def append_to_file(file_path, data):
+    """Append data to a file."""
+    with open(file_path, 'a') as file:
+        file.write(data)
+
+def read_file(file_path):
+    """Read and return the contents of a file."""
+    if os.path.exists(file_path):
+        with open(file_path, 'r') as file:
+            return file.readlines()
+    return []
 
 def audio_stream_generator(q):
     """Generator function that yields audio chunks from a queue."""
@@ -74,18 +99,12 @@ def generate_summary(content):
         "top_p": 0.95,
     }
     
-    safety_settings = {
-        generative_models.HarmCategory.HARM_CATEGORY_HATE_SPEECH: generative_models.HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-        generative_models.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: generative_models.HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-        generative_models.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: generative_models.HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-        generative_models.HarmCategory.HARM_CATEGORY_HARASSMENT: generative_models.HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-    }
-    
     responses = model.generate_content(
         contents=f"""
         Create a concise (1-2 sentences) summary from given transcript. 
         Write the summary in the third person, do NOT mention the transcript in the summary.  
         Include a dash at the beginning so that it can be used as a bullet point.
+        When you don't get any script, don't hallucinate.
 
         Transcript: 
         {content}
@@ -98,67 +117,108 @@ def generate_summary(content):
     output_text = "".join(response.text for response in responses)
     return output_text
 
-def generate_transcript(transcript_queue):
-    while True:
-        transcript = transcript_queue.get()
-        if transcript is None:
-            break
-        yield transcript
 
-def get_summary(summary_queue):
+def stream_summaries(summary_queue):
     while True:
         summary = summary_queue.get()
         if summary is None:
             break
         yield summary
 
-def summary_update(transcript_queue, summary_queue, stop_event):
+def summary_update(transcript_queue, summary_queue, stop_event, file_path):
     accumulated_text = ""
+    
     while not stop_event.is_set():
         try:
-                transcript = transcript_queue.get_nowait()
-                if transcript:
-                    print(f"Received transcript: {transcript}")  # Debugging print
-                accumulated_text += " " + transcript
+            transcript = transcript_queue.get_nowait()
+            if transcript:
+                print(f"Received transcript: {transcript}")  # Debugging print
+            accumulated_text += " " + transcript
         except queue.Empty:
             if accumulated_text:
                 print(f"Accumulated transcript for summary: {accumulated_text}")  # Debugging print
                 summary = generate_summary(accumulated_text)
                 if summary:
                     print(f"Generated summary: {summary}")  # Debugging print
+                    
+                append_to_file(file_path, summary)
                 summary_queue.put(summary)
+                #st.session_state['summaries'].append(summary)
                 accumulated_text = ""
-            time.sleep(30)  
+            time.sleep(30)
+
+#def display_all_summaries():
+   # for summary in st.session_state.summaries:
+    #    st.write(summary)
 
 def main():
-    st.title("Real-time Speech Recognition")
+    
+    logo_html = f'''
+    <div style="display: flex; align-items: center; justify-content: right; font-size: 30px;">
+        <img src="data:image/png;base64,{base64.b64encode(open(KBC_LOGO, "rb").read()).decode()}" style="height: 60px;">
+        <span style="margin: 0 20px;">➕</span>
+        <img src="data:image/png;base64,{base64.b64encode(open(GC_LOGO, "rb").read()).decode()}" style="height: 60px;">
+        <span style="margin: 0 20px;">🟰</span>
+        <span>❤️</span>
+        <br><br>
+    </div>
+    '''
+    st.markdown(f"{logo_html}", unsafe_allow_html=True)
+    
+    
+   # if 'summaries' not in st.session_state:
+    #    st.session_state['summaries'] = []
+    
+    st.title("Real-time Speech Recognition and Summary Generation")
+    summaries_file_path = 'summaries.txt'
 
     transcript_queue = queue.Queue()
     summary_queue = queue.Queue()
     stop_event = threading.Event()
 
-    if st.button("Start Recording"):
-        if 'transcribe_thread' in st.session_state and st.session_state.transcribe_thread.is_alive():
-            st.warning("Recording is already in progress")
-        else:
-            stop_event.clear()
-            st.session_state.transcribe_thread = threading.Thread(target=stream_audio, args=(transcript_queue, stop_event), daemon=True)
-            st.session_state.summary_thread = threading.Thread(target=summary_update, args=(transcript_queue, summary_queue, stop_event), daemon=True)
-            st.session_state.transcribe_thread.start()
-            st.session_state.summary_thread.start()
-            st.success("Recording started")
-
-    if st.button("Stop Recording"):
-        stop_event.set()
-        if 'transcribe_thread' in st.session_state:
-            st.session_state.transcribe_thread.join()
-            st.session_state.summary_thread.join()
-            st.success("Recording stopped")
-            transcript_queue.put(None)  # Signal the generator to terminate
+    transcription_thread = None
+    summary_thread = None
     
-    st.subheader("Summary 🤪")
-    summary = get_summary(summary_queue)
-    st.write_stream(summary)
+    st.markdown("####")
+    
+    col1, col2 = st.columns(2)    
+    start_button = col1.button("Start", use_container_width=True)
+    stop_button = col2.button("Stop", use_container_width=True)
 
+    if start_button:
+        create_or_clear_file(summaries_file_path)
+        stop_event.clear()
+        transcription_thread = threading.Thread(
+            target=stream_audio, args=(transcript_queue, stop_event))
+        summary_thread = threading.Thread(
+            target=summary_update, args=(transcript_queue, summary_queue, stop_event, summaries_file_path))
+
+        # Start the threads
+        transcription_thread.start()
+        summary_thread.start()
+
+        # Inform user of status
+        st.success("Recording and processing started.")
+        st.subheader("Summaries")
+        st.write_stream(stream_summaries(summary_queue))
+
+    if stop_button:
+        # Set the stop event to signal threads to stop
+        if transcription_thread and transcription_thread.is_alive():
+            stop_event.set()
+
+        # Wait for threads to finish
+            transcription_thread.join()
+        if summary_thread and summary_thread.is_alive():
+            summary_thread.join()
+        
+        # Inform user of status
+        st.success("Recording and processing stopped.")
+        st.subheader("Summaries")
+        summaries = read_file(summaries_file_path)
+        for summary in summaries:
+            st.write(summary)
+       # display_all_summaries()
+        
 if __name__ == "__main__":
     main()
