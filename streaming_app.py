@@ -31,13 +31,13 @@ def create_or_clear_file(file_path):
 
 def append_to_file(file_path, data):
     """Append data to a file."""
-    with open(file_path, 'a') as file:
+    with open(file_path, 'a', encoding="utf-8") as file:
         file.write(data)
 
 def read_file(file_path):
     """Read and return the contents of a file."""
     if os.path.exists(file_path):
-        with open(file_path, 'r') as file:
+        with open(file_path, 'r', encoding="utf-8") as file:
             return file.readlines()
     return []
 
@@ -111,10 +111,12 @@ def generate_summary(content):
     
     responses = model.generate_content(
         contents=f"""
-        Create a concise (1-2 sentences) summary from given transcript. 
+        Create a concise (1-2 sentences) summary from given transcript, and translate it to Romanian. 
         Write the summary in the third person, do NOT mention the transcript in the summary.  
         Include a dash at the beginning so that it can be used as a bullet point.
-        When you don't get any script, don't hallucinate.
+        When you don't get any script, don't hallucinate. 
+        
+        Return only the translated summary.
 
         Transcript: 
         {content}
